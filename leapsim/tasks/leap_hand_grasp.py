@@ -123,25 +123,23 @@ class LeapHandGrasp(LeapHandRot):
         self.at_reset_buf[env_ids] = 1
 
     def compute_reward(self, actions):
-        def list_intersect(li, hash_num):
-            # 17 is the object index
-            # 4, 8, 12, 16 are fingertip index
-            # return number of contact with obj_id
-            obj_id = 17
-            query_list = [obj_id * hash_num + 4, obj_id * hash_num + 8, obj_id * hash_num + 12, obj_id * hash_num + 16]
-            return len(np.intersect1d(query_list, li))
-        assert self.device == 'cpu'
-        contacts = [self.gym.get_env_rigid_contacts(env) for env in self.envs]
-        contact_list = [list_intersect(np.unique([c[2] * 10000 + c[3] for c in contact]), 10000) for contact in contacts]
-        contact_condition = to_torch(contact_list, device=self.device)
+        # Use tensor API for contacts
+        contact_force_tensor = self.gym.acquire_net_contact_force_tensor(self.sim)
+        contact_force_tensor = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, -1, 3)
+        fingertip_indices = [4, 8, 12, 16]
+        contact_condition = torch.zeros(self.num_envs, device=self.device)
+        threshold = 1e-3
 
-        
+        for tip_idx in fingertip_indices:
+            tip_forces = contact_force_tensor[:, tip_idx, :].norm(dim=-1)
+            contact_condition += (tip_forces > threshold).float()
+
         obj_pos = self.rigid_body_states[:, [-1], :3]
         finger_pos = self.rigid_body_states[:, [4, 8, 12, 16], :3]
         # the sampled pose need to satisfy (check 1 here):
         # 1) all fingertips is nearby objects
         cond1 = (torch.sqrt(((obj_pos - finger_pos) ** 2).sum(-1)) < self.finger_dist_threshold).all(-1)
-        # 2) at least two fingers are in contact with object
+        # 2) at least num_contact_fingers are in contact with object
         cond2 = contact_condition >= self.num_contact_fingers
         # 3) object does not fall after a few iterations
         # 0.645 for internal leap

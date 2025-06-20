@@ -38,7 +38,7 @@ class HardwarePlayer(object):
     def __init__(self, config):
         self.config = omegaconf_to_dict(config)
         self.set_defaults()
-        self.action_scale = 1 / 24
+        self.action_scale = 1 / 18
         self.actions_num = 16
         self.device = 'cuda'
 
